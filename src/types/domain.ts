@@ -8,36 +8,26 @@ export type RepositoryRef = {
 export type RepoStats = {
   stars: number;
   forks: number;
-  openIssues: number;
-  closedIssues: number;
-  openPullRequests: number;
-  closedPullRequests: number;
-  commits: number;
+  contributors: number;
 };
 
 export type CommitEvent = {
   sha: string;
-  message: string;
-  author: string;
-  committedAt: string;
-  url: string;
+  authoredAt: string;
+  title: string;
+  body: string;
 };
 
 export type PullRequestEvent = {
   number: number;
   title: string;
-  state: "open" | "closed" | "merged";
-  author: string;
-  createdAt: string;
-  mergedAt?: string;
-  closedAt?: string;
-  url: string;
+  mergedAt: string;
 };
 
 export type ReleaseEvent = {
   tagName: string;
-  name: string;
   publishedAt: string;
+  name: string;
   url: string;
 };
 
@@ -101,7 +91,7 @@ export type Milestone = {
     | "direction_shift";
   timestamp: string;
   title: string;
-  description: string;
+  summary: string;
   whyItMatters: string;
   confidence: "high" | "medium" | "low";
   evidenceBucketIds: string[];

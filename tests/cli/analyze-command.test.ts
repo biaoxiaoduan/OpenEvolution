@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { buildCli } from "../../src/cli";
+import { buildCli } from "../../src/cli.js";
 
 describe("buildCli", () => {
   it("parses the analyze command into a normalized request", async () => {

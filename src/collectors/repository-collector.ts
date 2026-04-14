@@ -48,10 +48,10 @@ export async function collectRepositoryData({
 
   const [repoResponse, commitResponses, pullRequestResponses, releaseResponses, contributorResponses] = await Promise.all([
     fetcher(`/repos/${repository.owner}/${repository.name}`) as Promise<GitHubRepositoryResponse>,
-    fetcher(`/commits${basePath}?per_page=100`) as Promise<GitHubCommitResponse[]>,
-    fetcher(`/pulls${basePath}?state=closed&sort=updated&direction=desc&per_page=100`) as Promise<GitHubPullRequestResponse[]>,
-    fetcher(`/releases${basePath}?per_page=20`) as Promise<GitHubReleaseResponse[]>,
-    fetcher(`/contributors${basePath}?per_page=20`) as Promise<GitHubContributorResponse[]>,
+    fetchPaginatedResults<GitHubCommitResponse>(fetcher, `/commits${basePath}?per_page=100`),
+    fetchPaginatedResults<GitHubPullRequestResponse>(fetcher, `/pulls${basePath}?state=closed&sort=updated&direction=desc&per_page=100`),
+    fetchPaginatedResults<GitHubReleaseResponse>(fetcher, `/releases${basePath}?per_page=20`),
+    fetchPaginatedResults<GitHubContributorResponse>(fetcher, `/contributors${basePath}?per_page=20`),
   ]);
 
   const commits = commitResponses.map(normalizeCommit);
@@ -80,11 +80,12 @@ function parseRepositoryRef(repoUrl: string): RepositoryRef {
   const url = new URL(repoUrl);
   const segments = url.pathname.split("/").filter(Boolean);
 
-  if (url.hostname !== "github.com" || segments.length < 2) {
+  if (!["github.com", "www.github.com"].includes(url.hostname) || segments.length < 2) {
     throw new Error(`Invalid GitHub repository URL: ${repoUrl}`);
   }
 
-  const [owner, name] = segments;
+  const [owner, rawName] = segments;
+  const name = rawName.endsWith(".git") ? rawName.slice(0, -4) : rawName;
 
   return {
     owner,
@@ -129,4 +130,18 @@ function findFirstCommitAt(commits: CommitEvent[]): string {
   return commits.reduce((earliest, commit) => {
     return commit.authoredAt < earliest ? commit.authoredAt : earliest;
   }, commits[0].authoredAt);
+}
+
+async function fetchPaginatedResults<T>(fetcher: JsonFetcher, url: string): Promise<T[]> {
+  const results: T[] = [];
+
+  for (let page = 1; ; page += 1) {
+    const pageResults = await fetcher(`${url}&page=${page}`);
+
+    if (!Array.isArray(pageResults) || pageResults.length === 0) {
+      return results;
+    }
+
+    results.push(...(pageResults as T[]));
+  }
 }

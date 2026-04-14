@@ -1,0 +1,26 @@
+{
+  "repository": {
+    "owner": "acme",
+    "name": "rocket",
+    "slug": "acme-rocket",
+    "url": "https://github.com/acme/rocket"
+  },
+  "stats": {
+    "stars": 42,
+    "forks": 5,
+    "contributors": 2
+  },
+  "firstCommitAt": "2024-01-01T00:00:00Z",
+  "commits": [
+    {
+      "sha": "1",
+      "authoredAt": "2024-01-01T00:00:00Z",
+      "title": "Initial prototype",
+      "body": ""
+    }
+  ],
+  "pullRequests": [],
+  "releases": [],
+  "readmeSnapshots": [],
+  "starHistory": []
+}

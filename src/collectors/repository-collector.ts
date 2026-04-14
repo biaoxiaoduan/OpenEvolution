@@ -1,9 +1,18 @@
-import type { CollectedRepositoryData, CommitEvent, PullRequestEvent, ReleaseEvent, RepositoryRef } from "../types/domain.js";
+import type {
+  CollectedRepositoryData,
+  CommitEvent,
+  PullRequestEvent,
+  ReleaseEvent,
+  RepositoryRef,
+} from "../types/domain.js";
 import { createGitHubFetcher, type JsonFetcher } from "./github-client.js";
+import { collectReadmeSnapshots } from "./readme-snapshots.js";
+import { collectStarHistory } from "./star-history.js";
 
 type CollectRepositoryDataInput = {
   repoUrl: string;
   githubToken?: string;
+  starHistoryEndpoint?: string;
   fetcher?: JsonFetcher;
 };
 
@@ -41,17 +50,43 @@ type GitHubContributorResponse = {
 export async function collectRepositoryData({
   repoUrl,
   githubToken,
+  starHistoryEndpoint,
   fetcher = createGitHubFetcher(githubToken),
 }: CollectRepositoryDataInput): Promise<CollectedRepositoryData> {
   const repository = parseRepositoryRef(repoUrl);
   const basePath = `/${repository.owner}/${repository.name}`;
 
-  const [repoResponse, commitResponses, pullRequestResponses, releaseResponses, contributorResponses] = await Promise.all([
+  const [
+    repoResponse,
+    commitResponses,
+    pullRequestResponses,
+    releaseResponses,
+    contributorResponses,
+    readmeSnapshots,
+    starHistory,
+  ] = await Promise.all([
     fetcher(`/repos/${repository.owner}/${repository.name}`) as Promise<GitHubRepositoryResponse>,
-    fetchPaginatedResults<GitHubCommitResponse>(fetcher, `/commits${basePath}?per_page=100`),
-    fetchPaginatedResults<GitHubPullRequestResponse>(fetcher, `/pulls${basePath}?state=closed&sort=updated&direction=desc&per_page=100`),
-    fetchPaginatedResults<GitHubReleaseResponse>(fetcher, `/releases${basePath}?per_page=20`),
-    fetchPaginatedResults<GitHubContributorResponse>(fetcher, `/contributors${basePath}?per_page=20`),
+    fetchPaginatedResults<GitHubCommitResponse>(
+      fetcher,
+      `/commits${basePath}?per_page=100`,
+    ),
+    fetchPaginatedResults<GitHubPullRequestResponse>(
+      fetcher,
+      `/pulls${basePath}?state=closed&sort=updated&direction=desc&per_page=100`,
+    ),
+    fetchPaginatedResults<GitHubReleaseResponse>(
+      fetcher,
+      `/releases${basePath}?per_page=20`,
+    ),
+    fetchPaginatedResults<GitHubContributorResponse>(
+      fetcher,
+      `/contributors${basePath}?per_page=20`,
+    ),
+    collectReadmeSnapshots(repository),
+    collectStarHistory({
+      repoUrl,
+      endpoint: starHistoryEndpoint,
+    }),
   ]);
 
   const commits = commitResponses.map(normalizeCommit);
@@ -71,8 +106,8 @@ export async function collectRepositoryData({
     commits,
     pullRequests,
     releases,
-    readmeSnapshots: [],
-    starHistory: [],
+    readmeSnapshots,
+    starHistory,
   };
 }
 

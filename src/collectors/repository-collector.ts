@@ -30,8 +30,8 @@ type GitHubPullRequestResponse = {
 
 type GitHubReleaseResponse = {
   tag_name: string;
-  name: string;
-  published_at: string;
+  name: string | null;
+  published_at: string | null;
 };
 
 type GitHubContributorResponse = {
@@ -44,13 +44,14 @@ export async function collectRepositoryData({
   fetcher = createGitHubFetcher(githubToken),
 }: CollectRepositoryDataInput): Promise<CollectedRepositoryData> {
   const repository = parseRepositoryRef(repoUrl);
+  const basePath = `/${repository.owner}/${repository.name}`;
 
   const [repoResponse, commitResponses, pullRequestResponses, releaseResponses, contributorResponses] = await Promise.all([
     fetcher(`/repos/${repository.owner}/${repository.name}`) as Promise<GitHubRepositoryResponse>,
-    fetcher(`/commits/${repository.owner}/${repository.name}`) as Promise<GitHubCommitResponse[]>,
-    fetcher(`/pulls/${repository.owner}/${repository.name}?state=closed`) as Promise<GitHubPullRequestResponse[]>,
-    fetcher(`/releases/${repository.owner}/${repository.name}`) as Promise<GitHubReleaseResponse[]>,
-    fetcher(`/contributors/${repository.owner}/${repository.name}`) as Promise<GitHubContributorResponse[]>,
+    fetcher(`/commits${basePath}?per_page=100`) as Promise<GitHubCommitResponse[]>,
+    fetcher(`/pulls${basePath}?state=closed&sort=updated&direction=desc&per_page=100`) as Promise<GitHubPullRequestResponse[]>,
+    fetcher(`/releases${basePath}?per_page=20`) as Promise<GitHubReleaseResponse[]>,
+    fetcher(`/contributors${basePath}?per_page=20`) as Promise<GitHubContributorResponse[]>,
   ]);
 
   const commits = commitResponses.map(normalizeCommit);
@@ -115,14 +116,14 @@ function normalizePullRequest(pullRequest: GitHubPullRequestResponse): PullReque
 function normalizeRelease(release: GitHubReleaseResponse): ReleaseEvent {
   return {
     tagName: release.tag_name,
-    name: release.name,
-    publishedAt: release.published_at,
+    name: release.name || release.tag_name,
+    publishedAt: release.published_at ?? "",
   };
 }
 
 function findFirstCommitAt(commits: CommitEvent[]): string {
   if (commits.length === 0) {
-    return "";
+    return new Date().toISOString();
   }
 
   return commits.reduce((earliest, commit) => {

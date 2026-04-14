@@ -44,17 +44,17 @@ export type ReleaseEvent = {
 export type ReadmeSnapshot = {
   capturedAt: string;
   content: string;
-  sourceUrl?: string;
 };
 
 export type StarPoint = {
-  date: string;
+  timestamp: string;
   stars: number;
 };
 
 export type CollectedRepositoryData = {
   repository: RepositoryRef;
   stats: RepoStats;
+  firstCommitAt: string;
   commits: CommitEvent[];
   pullRequests: PullRequestEvent[];
   releases: ReleaseEvent[];
@@ -62,37 +62,65 @@ export type CollectedRepositoryData = {
   starHistory: StarPoint[];
 };
 
-export type TimeBucket = "day" | "week" | "month" | "quarter" | "year";
-
-export type BucketInterpretation = {
-  bucket: TimeBucket;
-  label: string;
-  summary: string;
-  confidence: number;
+export type TimeBucket = {
+  id: string;
+  startAt: string;
+  endAt: string;
+  commitTitles: string[];
+  pullRequestTitles: string[];
+  releases: string[];
+  readmeChanged: boolean;
+  starDelta: number;
 };
 
-export type EvolutionStage =
-  | "bootstrap"
-  | "adoption"
-  | "growth"
-  | "scale"
-  | "maturity"
-  | "decline";
+export type BucketInterpretation = {
+  bucketId: string;
+  summary: string;
+  dominantWorkTypes: string[];
+  productIntent: string;
+};
+
+export type EvolutionStage = {
+  id: string;
+  name: "exploration" | "formation" | "growth" | "breakout";
+  startAt: string;
+  endAt: string;
+  summary: string;
+  whyThisStage: string;
+  dominantWorkTypes: string[];
+  productState: string;
+  evidenceBucketIds: string[];
+};
 
 export type Milestone = {
-  id: string;
+  type:
+    | "first_usable"
+    | "first_good_ux"
+    | "first_demo_ready"
+    | "pre_breakout_turning_point"
+    | "direction_shift";
+  timestamp: string;
   title: string;
   description: string;
-  date: string;
-  stage: EvolutionStage;
-  evidence: string[];
+  whyItMatters: string;
+  confidence: "high" | "medium" | "low";
+  evidenceBucketIds: string[];
 };
 
 export type AnalysisResult = {
-  repository: RepositoryRef;
-  generatedAt: string;
-  stage: EvolutionStage;
-  summary: string;
+  project: {
+    repository: RepositoryRef;
+    stats: RepoStats;
+    firstCommitAt: string;
+    analyzedAt: string;
+  };
+  timelineBuckets: Array<TimeBucket & { interpretation?: BucketInterpretation }>;
+  stages: EvolutionStage[];
   milestones: Milestone[];
-  bucketInterpretations: BucketInterpretation[];
+  breakoutAnalysis: string;
+  insights: Array<{
+    pattern: string;
+    evidence: string;
+    transferableTakeaway: string;
+  }>;
 };

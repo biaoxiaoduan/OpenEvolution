@@ -28,7 +28,6 @@ export type ReleaseEvent = {
   tagName: string;
   publishedAt: string;
   name: string;
-  url: string;
 };
 
 export type ReadmeSnapshot = {

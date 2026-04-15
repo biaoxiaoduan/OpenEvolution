@@ -1,4 +1,5 @@
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { analyzeRepository } from "../../src/pipeline/analyze-repository.js";
 
@@ -41,6 +42,7 @@ describe("analyzeRepository", () => {
           insights: [],
         }),
         createClient: () => ({
+          listModels: async () => ["gpt-5.4-mini"],
           generateJson: async () => {
             throw new Error("The pipeline test should use the injected analysis stages");
           },
@@ -50,12 +52,16 @@ describe("analyzeRepository", () => {
 
     expect(result.paths.analysisJson.endsWith("artifacts/analysis.json")).toBe(true);
     expect(result.paths.reportHtml.endsWith("report/index.html")).toBe(true);
+    expect(result.paths.runManifest.endsWith("artifacts/run-manifest.json")).toBe(true);
 
     const analysisJson = await readFile(result.paths.analysisJson, "utf8");
     const reportHtml = await readFile(result.paths.reportHtml, "utf8");
+    const manifestJson = await readFile(result.paths.runManifest, "utf8");
 
     expect(analysisJson).toContain("No confident breakout detected.");
     expect(reportHtml).toContain("Breakout Analysis");
+    expect(manifestJson).toContain("\"status\": \"completed\"");
+    expect(manifestJson).toContain("\"report\"");
   });
 
   it("filters collected evidence by the requested time window", async () => {
@@ -128,6 +134,7 @@ describe("analyzeRepository", () => {
           insights: [],
         }),
         createClient: () => ({
+          listModels: async () => ["gpt-5.4-mini"],
           generateJson: async () => {
             throw new Error("The pipeline test should use the injected analysis stages");
           },
@@ -142,5 +149,162 @@ describe("analyzeRepository", () => {
         releases: ["v0.2.0"],
       },
     ]);
+  });
+
+  it("auto-resolves a compatible model when the command omits one", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+    delete process.env.OPENEVOLUTION_MODEL;
+
+    const requestedModels: string[] = [];
+
+    await analyzeRepository({
+      command: {
+        repoUrl: "https://github.com/acme/rocket",
+        outputDir: "./tmp/acme-rocket-model-resolution-test",
+        noCache: true,
+        debug: false,
+      },
+      dependencies: {
+        collectRepositoryData: async () => ({
+          repository: { owner: "acme", name: "rocket", url: "https://github.com/acme/rocket", slug: "acme-rocket" },
+          stats: { stars: 42, forks: 5, contributors: 2 },
+          firstCommitAt: "2024-01-01T00:00:00Z",
+          commits: [{ sha: "1", authoredAt: "2024-01-01T00:00:00Z", title: "Initial prototype", body: "" }],
+          pullRequests: [],
+          releases: [],
+          readmeSnapshots: [],
+          starHistory: [],
+        }),
+        interpretBuckets: async (input) => {
+          expect(input.model).toBeDefined();
+          requestedModels.push(input.model ?? "");
+          return input.buckets.map((bucket) => ({
+            bucketId: bucket.id,
+            summary: "Initial technical validation",
+            dominantWorkTypes: ["technical"],
+            productIntent: "Validate feasibility",
+          }));
+        },
+        synthesizeAnalysis: async (input) => {
+          expect(input.model).toBeDefined();
+          requestedModels.push(input.model ?? "");
+          return {
+            project: input.project,
+            timelineBuckets: input.timelineBuckets,
+            stages: [],
+            milestones: [],
+            breakoutAnalysis: "No confident breakout detected.",
+            insights: [],
+          };
+        },
+        createClient: () => ({
+          listModels: async () => ["glm-5.1", "qwen3.5-flash"],
+          generateJson: async () => {
+            throw new Error("The pipeline test should use the injected analysis stages");
+          },
+        }),
+      },
+    });
+
+    expect(requestedModels).toEqual(["qwen3.5-flash", "qwen3.5-flash"]);
+  });
+
+  it("reuses completed artifacts when cache reuse is enabled", async () => {
+    process.env.OPENAI_API_KEY = "test-key";
+
+    const outputDir = "./tmp/acme-rocket-cache-reuse-test";
+    const artifactDir = join(outputDir, "artifacts");
+    const reportDir = join(outputDir, "report");
+    const cachedAnalysis = {
+      project: {
+        repository: {
+          owner: "acme",
+          name: "rocket",
+          url: "https://github.com/acme/rocket",
+          slug: "acme-rocket",
+        },
+        stats: { stars: 42, forks: 5, contributors: 2 },
+        firstCommitAt: "2024-01-01T00:00:00Z",
+        analyzedAt: "2026-04-15T00:00:00Z",
+      },
+      timelineBuckets: [],
+      stages: [],
+      milestones: [],
+      breakoutAnalysis: "Cached analysis.",
+      insights: [],
+    };
+
+    await mkdir(artifactDir, { recursive: true });
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      join(artifactDir, "analysis.json"),
+      `${JSON.stringify(cachedAnalysis, null, 2)}\n`,
+      "utf8",
+    );
+    await writeFile(join(reportDir, "index.html"), "<html>cached</html>\n", "utf8");
+    await writeFile(
+      join(artifactDir, "run-manifest.json"),
+      `${JSON.stringify(
+        {
+          repoSlug: "acme-rocket",
+          status: "completed",
+          stages: {
+            collected: {
+              status: "completed",
+              outputPath: join(artifactDir, "collected.json"),
+            },
+            time_buckets: {
+              status: "completed",
+              outputPath: join(artifactDir, "time-buckets.json"),
+            },
+            interpretations: {
+              status: "completed",
+              outputPath: join(artifactDir, "bucket-interpretations.json"),
+            },
+            analysis: {
+              status: "completed",
+              outputPath: join(artifactDir, "analysis.json"),
+            },
+            report: {
+              status: "completed",
+              outputPath: join(reportDir, "index.html"),
+            },
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const result = await analyzeRepository({
+      command: {
+        repoUrl: "https://github.com/acme/rocket",
+        outputDir,
+        noCache: false,
+        debug: false,
+      },
+      dependencies: {
+        collectRepositoryData: async () => {
+          throw new Error("collectRepositoryData should not run when cache is reusable");
+        },
+        interpretBuckets: async () => {
+          throw new Error("interpretBuckets should not run when cache is reusable");
+        },
+        synthesizeAnalysis: async () => {
+          throw new Error("synthesizeAnalysis should not run when cache is reusable");
+        },
+        createClient: () => ({
+          listModels: async () => ["qwen3.5-flash"],
+          generateJson: async () => {
+            throw new Error("createClient should not be used when cache is reusable");
+          },
+        }),
+      },
+    });
+
+    expect(result.analysis.breakoutAnalysis).toBe("Cached analysis.");
+    expect(result.paths.analysisJson.endsWith("artifacts/analysis.json")).toBe(true);
+    expect(result.paths.reportHtml.endsWith("report/index.html")).toBe(true);
   });
 });

@@ -14,6 +14,7 @@ type CollectRepositoryDataInput = {
   githubToken?: string;
   starHistoryEndpoint?: string;
   fetcher?: JsonFetcher;
+  collectReadmeSnapshots?: typeof collectReadmeSnapshots;
 };
 
 type GitHubRepositoryResponse = {
@@ -52,6 +53,7 @@ export async function collectRepositoryData({
   githubToken,
   starHistoryEndpoint,
   fetcher = createGitHubFetcher(githubToken),
+  collectReadmeSnapshots: collectReadmeSnapshotsOverride = collectReadmeSnapshots,
 }: CollectRepositoryDataInput): Promise<CollectedRepositoryData> {
   const repository = parseRepositoryRef(repoUrl);
   const basePath = `/${repository.owner}/${repository.name}`;
@@ -82,7 +84,7 @@ export async function collectRepositoryData({
       fetcher,
       `/contributors${basePath}?per_page=20`,
     ),
-    collectReadmeSnapshots(repository),
+    collectReadmeSnapshotsOverride(repository),
     collectStarHistory({
       repoUrl,
       endpoint: starHistoryEndpoint,

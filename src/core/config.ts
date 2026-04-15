@@ -2,6 +2,7 @@ export type AppConfig = {
   openAiApiKey: string;
   githubToken?: string;
   starHistoryEndpoint?: string;
+  defaultModel?: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
@@ -15,5 +16,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): AppConfig {
     openAiApiKey: openaiApiKey,
     githubToken: env.GITHUB_TOKEN,
     starHistoryEndpoint: env.STAR_HISTORY_ENDPOINT,
+    defaultModel: env.OPENEVOLUTION_MODEL,
   };
 }

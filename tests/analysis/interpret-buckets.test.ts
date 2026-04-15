@@ -17,6 +17,7 @@ describe("interpretBuckets", () => {
         },
       ],
       client: {
+        listModels: async () => ["qwen3.5-flash"],
         generateJson: async <T>() =>
           ({
             bucketId: "2024-01-01T00:00:00.000Z",

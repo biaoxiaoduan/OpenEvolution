@@ -5,7 +5,7 @@ export type AnalyzeCommand = {
   outputDir: string;
   since?: string;
   until?: string;
-  model: string;
+  model?: string;
   noCache: boolean;
   debug: boolean;
 };
@@ -27,7 +27,10 @@ export function buildCli(
     .requiredOption("--output <dir>")
     .option("--since <date>")
     .option("--until <date>")
-    .option("--model <name>", "LLM model name", "gpt-5.4-mini")
+    .option(
+      "--model <name>",
+      "LLM model name (optional if the provider can auto-resolve one)",
+    )
     .option("--no-cache", "Disable artifact cache reuse", false)
     .option("--debug", "Write verbose artifacts", false)
     .action(async (repoUrl: string, options) => {

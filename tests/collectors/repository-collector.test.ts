@@ -176,4 +176,39 @@ describe("collectRepositoryData", () => {
     expect(requestedUrls).toContain("/releases/acme/rocket?per_page=20&page=2");
     expect(requestedUrls).toContain("/contributors/acme/rocket?per_page=20&page=2");
   });
+
+  it("includes readme snapshots from an injected readme collector", async () => {
+    const data = await collectRepositoryData({
+      repoUrl: "https://github.com/acme/rocket",
+      fetcher: async (url: string) => {
+        if (url === "/repos/acme/rocket") {
+          return { stargazers_count: 42, forks_count: 7 };
+        }
+
+        if (
+          url.includes("/commits") ||
+          url.includes("/pulls") ||
+          url.includes("/releases") ||
+          url.includes("/contributors")
+        ) {
+          return [];
+        }
+
+        throw new Error(`Unexpected URL: ${url}`);
+      },
+      collectReadmeSnapshots: async () => [
+        {
+          capturedAt: "2024-01-10T00:00:00Z",
+          content: "# Rocket",
+        },
+      ],
+    });
+
+    expect(data.readmeSnapshots).toEqual([
+      {
+        capturedAt: "2024-01-10T00:00:00Z",
+        content: "# Rocket",
+      },
+    ]);
+  });
 });

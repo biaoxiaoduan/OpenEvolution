@@ -29,6 +29,7 @@ describe("synthesizeAnalysis", () => {
         },
       ],
       client: {
+        listModels: async () => ["qwen3.5-flash"],
         generateJson: async <T>({ system }: { system: string }) => {
           if (system.includes("Segment repository evolution")) {
             return [
@@ -96,6 +97,7 @@ describe("synthesizeAnalysis", () => {
         },
       ],
       client: {
+        listModels: async () => ["qwen3.5-flash"],
         generateJson: async <T>({ system }: { system: string }) => {
           if (system.includes("Segment repository evolution")) {
             return [] as T;

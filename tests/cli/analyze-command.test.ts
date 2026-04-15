@@ -32,4 +32,31 @@ describe("buildCli", () => {
       debug: false,
     });
   });
+
+  it("leaves model undefined when the user does not pass one explicitly", async () => {
+    const runAnalyze = vi.fn().mockResolvedValue(undefined);
+    const program = buildCli(runAnalyze);
+
+    await program.parseAsync(
+      [
+        "node",
+        "openevolution",
+        "analyze",
+        "https://github.com/vercel/next.js",
+        "--output",
+        "./outputs/next-js",
+      ],
+      { from: "user" },
+    );
+
+    expect(runAnalyze).toHaveBeenCalledWith({
+      repoUrl: "https://github.com/vercel/next.js",
+      outputDir: "./outputs/next-js",
+      since: undefined,
+      until: undefined,
+      model: undefined,
+      noCache: false,
+      debug: false,
+    });
+  });
 });

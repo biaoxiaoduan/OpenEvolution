@@ -56,4 +56,29 @@ describe("createOpenAiClient", () => {
       }),
     ).rejects.toThrow("Model did not return parsed JSON output");
   });
+
+  it("retries once when parsed output is missing and then succeeds", async () => {
+    const parse = vi
+      .fn()
+      .mockResolvedValueOnce({ output_parsed: null })
+      .mockResolvedValueOnce({ output_parsed: { ok: true } });
+
+    const client = createOpenAiClient("test-key", {
+      responses: { parse },
+      retryPolicy: { attempts: 2, delayMs: 0 },
+    });
+
+    const result = await client.generateJson({
+      model: "qwen3.5-flash",
+      system: "Return JSON.",
+      user: "Return {\"ok\": true}",
+      schemaName: "simple_result",
+      schema: z.object({
+        ok: z.boolean(),
+      }),
+    });
+
+    expect(result).toEqual({ ok: true });
+    expect(parse).toHaveBeenCalledTimes(2);
+  });
 });

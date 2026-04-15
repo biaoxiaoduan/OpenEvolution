@@ -4,9 +4,23 @@ import { createOpenAiClient, type JsonSchemaClient } from "../analysis/llm-clien
 import { interpretBuckets } from "../analysis/interpret-buckets.js";
 import { synthesizeAnalysis } from "../analysis/synthesize-analysis.js";
 import { collectRepositoryData } from "../collectors/repository-collector.js";
-import { writeJsonArtifact } from "../core/artifact-store.js";
+import { readJsonFile, writeJsonArtifact } from "../core/artifact-store.js";
 import { loadConfig } from "../core/config.js";
+import { resolveModel } from "../core/model-strategy.js";
 import { createRunContext } from "../core/run-context.js";
+import {
+  createEmptyRunManifest,
+  markRunCompleted,
+  markRunFailed,
+  markRunRunning,
+  markStageComplete,
+  markStageFailed,
+  markStageRunning,
+  type RunManifest,
+  type RunStageName,
+  readRunManifest,
+  writeRunManifest,
+} from "../core/run-manifest.js";
 import { buildTimeBuckets } from "../preprocess/time-buckets.js";
 import { writeReport } from "../render/render-report.js";
 import type { AnalysisResult, BucketInterpretation } from "../types/domain.js";
@@ -17,6 +31,64 @@ type AnalyzeRepositoryDependencies = {
   synthesizeAnalysis?: typeof synthesizeAnalysis;
   createClient?: (apiKey: string) => JsonSchemaClient;
 };
+
+function deriveRepoSlug(repoUrl: string): string {
+  const url = new URL(repoUrl);
+  const segments = url.pathname.split("/").filter(Boolean);
+
+  if (!["github.com", "www.github.com"].includes(url.hostname) || segments.length < 2) {
+    throw new Error(`Invalid GitHub repository URL: ${repoUrl}`);
+  }
+
+  const [owner, rawName] = segments;
+  const name = rawName.endsWith(".git") ? rawName.slice(0, -4) : rawName;
+
+  return `${owner}-${name}`;
+}
+
+function getErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+async function tryReuseCompletedRun(input: {
+  command: AnalyzeCommand;
+  artifactDir: string;
+}): Promise<{
+  runManifest: string;
+  analysisJson: string;
+  reportHtml: string;
+  analysis: AnalysisResult;
+} | null> {
+  if (input.command.noCache) {
+    return null;
+  }
+
+  const manifest = await readRunManifest(input.artifactDir);
+
+  if (
+    !manifest ||
+    manifest.status !== "completed" ||
+    !manifest.stages.analysis.outputPath ||
+    !manifest.stages.report.outputPath
+  ) {
+    return null;
+  }
+
+  try {
+    const analysis = await readJsonFile<AnalysisResult>(
+      manifest.stages.analysis.outputPath,
+    );
+
+    return {
+      runManifest: join(input.artifactDir, "run-manifest.json"),
+      analysisJson: manifest.stages.analysis.outputPath,
+      reportHtml: manifest.stages.report.outputPath,
+      analysis,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function isWithinRange(
   timestamp: string,
@@ -78,6 +150,7 @@ export async function analyzeRepository(input: {
   paths: {
     analysisJson: string;
     reportHtml: string;
+    runManifest: string;
   };
   analysis: AnalysisResult;
 }> {
@@ -86,80 +159,161 @@ export async function analyzeRepository(input: {
   const synthesize = input.dependencies?.synthesizeAnalysis ?? synthesizeAnalysis;
   const createClient = input.dependencies?.createClient ?? createOpenAiClient;
 
-  const config = loadConfig(process.env);
-  const client = createClient(config.openAiApiKey);
-
-  const collected = filterCollectedData(
-    await collect({
-      repoUrl: input.command.repoUrl,
-      githubToken: config.githubToken,
-      starHistoryEndpoint: config.starHistoryEndpoint,
-    }),
-    input.command,
-  );
-
   const context = await createRunContext({
-    repoSlug: collected.repository.slug,
+    repoSlug: deriveRepoSlug(input.command.repoUrl),
     outputDir: input.command.outputDir,
     debug: input.command.debug,
   });
-
-  await writeJsonArtifact(context.paths.artifactDir, "collected.json", collected);
-
-  const buckets = buildTimeBuckets(collected);
-  await writeJsonArtifact(context.paths.artifactDir, "time-buckets.json", buckets);
-
-  const interpretations = await interpret({
-    buckets,
-    client,
-    model: input.command.model,
+  const cachedRun = await tryReuseCompletedRun({
+    command: input.command,
+    artifactDir: context.paths.artifactDir,
   });
-  await writeJsonArtifact(
-    context.paths.artifactDir,
-    "bucket-interpretations.json",
-    interpretations,
-  );
 
-  const interpretationMap = new Map<string, BucketInterpretation>(
-    interpretations.map((interpretation) => [interpretation.bucketId, interpretation]),
-  );
+  if (cachedRun) {
+    return {
+      paths: {
+        analysisJson: cachedRun.analysisJson,
+        reportHtml: cachedRun.reportHtml,
+        runManifest: cachedRun.runManifest,
+      },
+      analysis: cachedRun.analysis,
+    };
+  }
 
-  const timelineBuckets = buckets
-    .map((bucket) => ({
-      ...bucket,
-      interpretation: interpretationMap.get(bucket.id),
-    }))
-    .filter(
-      (
-        bucket,
-      ): bucket is typeof bucket & { interpretation: BucketInterpretation } =>
-        Boolean(bucket.interpretation),
+  const config = loadConfig(process.env);
+  const client = createClient(config.openAiApiKey);
+  const model = await resolveModel({
+    requestedModel: input.command.model ?? config.defaultModel,
+    listModels: () => client.listModels(),
+  });
+
+  let manifest: RunManifest = markRunRunning(
+    createEmptyRunManifest(context.repoSlug),
+  );
+  const updateManifest = async (nextManifest: RunManifest): Promise<string> => {
+    manifest = nextManifest;
+    return writeRunManifest(context.paths.artifactDir, manifest);
+  };
+
+  let runManifest = await updateManifest(manifest);
+  let activeStage: RunStageName | null = null;
+
+  try {
+    activeStage = "collected";
+    runManifest = await updateManifest(markStageRunning(manifest, activeStage));
+    const collected = filterCollectedData(
+      await collect({
+        repoUrl: input.command.repoUrl,
+        githubToken: config.githubToken,
+        starHistoryEndpoint: config.starHistoryEndpoint,
+      }),
+      input.command,
+    );
+    const collectedPath = await writeJsonArtifact(
+      context.paths.artifactDir,
+      "collected.json",
+      collected,
+    );
+    runManifest = await updateManifest(
+      markStageComplete(manifest, activeStage, { outputPath: collectedPath }),
     );
 
-  const analysis = await synthesize({
-    project: {
-      repository: collected.repository,
-      stats: collected.stats,
-      firstCommitAt: collected.firstCommitAt,
-      analyzedAt: new Date().toISOString(),
-    },
-    timelineBuckets,
-    client,
-    model: input.command.model,
-  });
+    activeStage = "time_buckets";
+    runManifest = await updateManifest(markStageRunning(manifest, activeStage));
+    const buckets = buildTimeBuckets(collected);
+    const bucketsPath = await writeJsonArtifact(
+      context.paths.artifactDir,
+      "time-buckets.json",
+      buckets,
+    );
+    runManifest = await updateManifest(
+      markStageComplete(manifest, activeStage, { outputPath: bucketsPath }),
+    );
 
-  const analysisJson = await writeJsonArtifact(
-    context.paths.artifactDir,
-    "analysis.json",
-    analysis,
-  );
-  const reportHtml = await writeReport(analysis, context.paths.reportDir);
+    activeStage = "interpretations";
+    runManifest = await updateManifest(markStageRunning(manifest, activeStage));
+    const interpretations = await interpret({
+      buckets,
+      client,
+      model,
+    });
+    const interpretationsPath = await writeJsonArtifact(
+      context.paths.artifactDir,
+      "bucket-interpretations.json",
+      interpretations,
+    );
+    runManifest = await updateManifest(
+      markStageComplete(manifest, activeStage, { outputPath: interpretationsPath }),
+    );
 
-  return {
-    paths: {
-      analysisJson,
-      reportHtml,
-    },
-    analysis,
-  };
+    const interpretationMap = new Map<string, BucketInterpretation>(
+      interpretations.map((interpretation) => [
+        interpretation.bucketId,
+        interpretation,
+      ]),
+    );
+
+    const timelineBuckets = buckets
+      .map((bucket) => ({
+        ...bucket,
+        interpretation: interpretationMap.get(bucket.id),
+      }))
+      .filter(
+        (
+          bucket,
+        ): bucket is typeof bucket & { interpretation: BucketInterpretation } =>
+          Boolean(bucket.interpretation),
+      );
+
+    activeStage = "analysis";
+    runManifest = await updateManifest(markStageRunning(manifest, activeStage));
+    const analysis = await synthesize({
+      project: {
+        repository: collected.repository,
+        stats: collected.stats,
+        firstCommitAt: collected.firstCommitAt,
+        analyzedAt: new Date().toISOString(),
+      },
+      timelineBuckets,
+      client,
+      model,
+    });
+
+    const analysisJson = await writeJsonArtifact(
+      context.paths.artifactDir,
+      "analysis.json",
+      analysis,
+    );
+    runManifest = await updateManifest(
+      markStageComplete(manifest, activeStage, { outputPath: analysisJson }),
+    );
+
+    activeStage = "report";
+    runManifest = await updateManifest(markStageRunning(manifest, activeStage));
+    const reportHtml = await writeReport(analysis, context.paths.reportDir);
+    runManifest = await updateManifest(
+      markStageComplete(manifest, activeStage, { outputPath: reportHtml }),
+    );
+    runManifest = await updateManifest(markRunCompleted(manifest));
+
+    return {
+      paths: {
+        analysisJson,
+        reportHtml,
+        runManifest,
+      },
+      analysis,
+    };
+  } catch (error) {
+    if (activeStage) {
+      manifest = markStageFailed(manifest, activeStage, {
+        error: getErrorMessage(error),
+      });
+    }
+
+    runManifest = await updateManifest(
+      markRunFailed(manifest, getErrorMessage(error)),
+    );
+    throw error;
+  }
 }

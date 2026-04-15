@@ -6,6 +6,7 @@ import type {
 } from "../types/domain.js";
 import type { JsonSchemaClient } from "./llm-client.js";
 import { buildMilestonePrompt } from "./prompts.js";
+import { milestoneArraySchema } from "./schemas.js";
 
 export async function detectMilestones(input: {
   buckets: Array<TimeBucket & { interpretation: BucketInterpretation }>;
@@ -20,5 +21,7 @@ export async function detectMilestones(input: {
       buckets: input.buckets,
       stages: input.stages,
     }),
+    schema: milestoneArraySchema,
+    schemaName: "milestones",
   });
 }

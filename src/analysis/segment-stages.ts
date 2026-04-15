@@ -5,6 +5,7 @@ import type {
 } from "../types/domain.js";
 import type { JsonSchemaClient } from "./llm-client.js";
 import { buildStageSegmentationPrompt } from "./prompts.js";
+import { evolutionStageArraySchema } from "./schemas.js";
 
 export async function segmentStages(input: {
   buckets: Array<TimeBucket & { interpretation: BucketInterpretation }>;
@@ -15,5 +16,7 @@ export async function segmentStages(input: {
     model: input.model ?? "gpt-5.4-mini",
     system: "Segment repository evolution into stages and return JSON only.",
     user: buildStageSegmentationPrompt(input.buckets),
+    schema: evolutionStageArraySchema,
+    schemaName: "evolution_stages",
   });
 }

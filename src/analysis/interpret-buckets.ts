@@ -1,6 +1,7 @@
 import type { BucketInterpretation, TimeBucket } from "../types/domain.js";
 import type { JsonSchemaClient } from "./llm-client.js";
 import { buildBucketPrompt } from "./prompts.js";
+import { bucketInterpretationSchema } from "./schemas.js";
 
 export async function interpretBuckets(input: {
   buckets: TimeBucket[];
@@ -15,6 +16,8 @@ export async function interpretBuckets(input: {
       system:
         "You infer product intent from open-source repository history and return valid JSON only.",
       user: buildBucketPrompt(bucket),
+      schema: bucketInterpretationSchema,
+      schemaName: "bucket_interpretation",
     });
     interpretations.push(interpretation);
   }
